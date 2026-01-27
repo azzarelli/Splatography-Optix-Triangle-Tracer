@@ -1,0 +1,10 @@
+__pycache__
+/__pycache__
+output/
+.idea/
+lpipsPyTorch/
+debugging/
+venv/
+simple-knn/
+skip_coarse/*
+submodules/
