@@ -905,7 +905,7 @@ def process_Gaussians(pc, time):
         
     return means3D_final, rotations_final, opacity_final, colors_final, scales
 
-from utils.sh_utils import SH2RGB
+from utils.sh_utils import SH2RGB, eval_sh
 from gaussian_renderer.ray_tracer import RaycastSTE
 
 @torch.no_grad 
@@ -917,18 +917,25 @@ def render_triangles(viewpoint_camera, pc, optix_runner):
     means3D, rotation, opacity, colors, scales = process_Gaussians(pc, time)
     
     x, d = viewpoint_camera.generate_rays()
+    
+    d_mean = d.view(-1, 3).mean(0).unsqueeze(0)
 
     mag, dirs = pc.get_covmat
-    verts, colors = generate_triangles(means3D, mag, dirs, colors, opacity)
+        
+    cam_pos = viewpoint_camera.camera_center.to(means3D.device)  # you may need to adapt this
+    view_dirs = means3D - cam_pos[None, :]
+    view_dirs = view_dirs / (torch.linalg.norm(view_dirs, dim=-1, keepdim=True) + 1e-8)
+
+
+    verts, colors_v = generate_triangles(means3D, mag, dirs, colors, opacity, view_dirs)
     verts = verts.detach()
-    colors_v = colors.repeat_interleave(3, dim=0)
     N = 4
     # Forward through runner
     buffer_image = RaycastSTE.apply(x, d, N, colors_v, verts, optix_runner, False)
 
     return buffer_image
 
-def generate_triangles(means, mag, dirs, colors, opacity, thresh=0.1, half_extent=0.5):
+def generate_triangles(means, mag, dirs, colors, opacity, view_dirs, thresh=0.1, half_extent=0.5):
     """
     means:   (N,3)
     mag:     (N,2)          extents along the two in-plane axes
@@ -937,7 +944,7 @@ def generate_triangles(means, mag, dirs, colors, opacity, thresh=0.1, half_exten
     opacity: (N,1) or (N,)
     returns:
         verts_flat: (K*4*3, 3)   flattened triangle vertices
-        tri_rgb:    (K*4, 3)     per-triangle RGB from SH DC
+        tri_rgb:    (K, 3)     per-triangle RGB from SH DC
     """
     device, dtype = means.device, means.dtype
 
@@ -945,7 +952,7 @@ def generate_triangles(means, mag, dirs, colors, opacity, thresh=0.1, half_exten
     means  = means[mask]          # (K,3)
     mag    = mag[mask]            # (K,2)
     dirs   = dirs[mask]           # (K,2,3)
-    dc_rgb = colors[mask][:, 0, :]  # (K,3)  first SH coeff
+    rgb = colors[mask] 
 
     # Normalize dirs to avoid scale bugs
     dirs = dirs / (torch.linalg.norm(dirs, dim=-1, keepdim=True) + 1e-8)
@@ -972,6 +979,10 @@ def generate_triangles(means, mag, dirs, colors, opacity, thresh=0.1, half_exten
     verts_flat = tris.reshape(-1, 3)  # (K*4*3,3)
 
     # Repeat dc color per triangle
-    tri_rgb = dc_rgb[:, None, :].expand(-1, 4, -1).reshape(-1, 3)  # (K*4,3)
+    tri_rgb = eval_sh(3, rgb.permute(0,2,1), view_dirs[mask])
+    tri_rgb = (tri_rgb + 0.5).clamp(0.0, 1.0)
+    
+    # *** critical ***
+    # tri_rgb = (tri_rgb + 0.5).clamp(0.0, 1.0)
 
     return verts_flat, tri_rgb

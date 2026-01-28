@@ -196,7 +196,7 @@ class OptixTriangles(nn.Module):
 
         stream.synchronize()
 
-        buffer_hit = torch.utils.dlpack.from_dlpack(output_image).int()//N
+        buffer_hit = torch.utils.dlpack.from_dlpack(output_image).int()
         
         tri_idx = buffer_hit.view(torch.int32)   # (H,W) int32
 
