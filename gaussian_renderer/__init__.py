@@ -918,16 +918,15 @@ def render_triangles(viewpoint_camera, pc, optix_runner):
     
     x, d = viewpoint_camera.generate_rays()
     
-    d_mean = d.view(-1, 3).mean(0).unsqueeze(0)
-
     mag, dirs = pc.get_covmat
         
     cam_pos = viewpoint_camera.camera_center.to(means3D.device)  # you may need to adapt this
     view_dirs = means3D - cam_pos[None, :]
     view_dirs = view_dirs / (torch.linalg.norm(view_dirs, dim=-1, keepdim=True) + 1e-8)
 
-
-    verts, colors_v = generate_triangles(means3D, mag, dirs, colors, opacity, view_dirs)
+    motion_mask = pc.target_mask
+    
+    verts, colors_v = generate_triangles(means3D, mag, dirs, colors, opacity, view_dirs, motion_mask)
     verts = verts.detach()
     N = 4
     # Forward through runner
@@ -935,7 +934,7 @@ def render_triangles(viewpoint_camera, pc, optix_runner):
 
     return buffer_image
 
-def generate_triangles(means, mag, dirs, colors, opacity, view_dirs, thresh=0.1, half_extent=0.5):
+def generate_triangles(means, mag, dirs, colors, opacity, view_dirs, motion_mask, thresh=0.05, scale_factor=1.5):
     """
     means:   (N,3)
     mag:     (N,2)          extents along the two in-plane axes
@@ -948,7 +947,7 @@ def generate_triangles(means, mag, dirs, colors, opacity, view_dirs, thresh=0.1,
     """
     device, dtype = means.device, means.dtype
 
-    mask = (opacity.squeeze(-1) > thresh)
+    mask = (opacity.squeeze(-1) > thresh) & motion_mask
     means  = means[mask]          # (K,3)
     mag    = mag[mask]            # (K,2)
     dirs   = dirs[mask]           # (K,2,3)
@@ -961,10 +960,10 @@ def generate_triangles(means, mag, dirs, colors, opacity, view_dirs, thresh=0.1,
     signs = torch.tensor([[ 1,  1],
                           [-1,  1],
                           [-1, -1],
-                          [ 1, -1]], device=device, dtype=dtype)  # (4,2)
+                          [ 1, -1]], device=device, dtype=dtype) * scale_factor  # (4,2)
 
     # Corner points: mean + half_extent*(s0*mag0*dir0 + s1*mag1*dir1)
-    corner_offsets = half_extent * (
+    corner_offsets = (
         (signs[None, :, :, None] * mag[:, None, :, None] * dirs[:, None, :, :]).sum(dim=2)
     )  # (K,4,3)
     corners = means[:, None, :] + corner_offsets  # (K,4,3)
@@ -978,11 +977,7 @@ def generate_triangles(means, mag, dirs, colors, opacity, view_dirs, thresh=0.1,
     # Flatten verts like your original code expects
     verts_flat = tris.reshape(-1, 3)  # (K*4*3,3)
 
-    # Repeat dc color per triangle
     tri_rgb = eval_sh(3, rgb.permute(0,2,1), view_dirs[mask])
     tri_rgb = (tri_rgb + 0.5).clamp(0.0, 1.0)
-    
-    # *** critical ***
-    # tri_rgb = (tri_rgb + 0.5).clamp(0.0, 1.0)
 
     return verts_flat, tri_rgb
