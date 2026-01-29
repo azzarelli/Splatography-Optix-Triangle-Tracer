@@ -124,7 +124,7 @@ def compute_alpha_interval(A, B, cov6A, cov6B, alpha_threshold=0.1):
     return alpha
 
 def render(viewpoint_camera, pc, pipe, bg_color: torch.Tensor, scaling_modifier=1.0,
-           stage="fine", view_args=None, G=None, kernel_size=0.1):
+           stage="fine", view_args=None, sources=None, optix_runner=None):
     """
     Render the scene.
     """
@@ -203,9 +203,7 @@ def render(viewpoint_camera, pc, pipe, bg_color: torch.Tensor, scaling_modifier=
                 colors = (means3D - means3D_).abs()
     else:
         view_args= {'vis_mode':'render'}
-
-            
-    # print(.shape, means3D.shape)
+    
     rendered_image, rendered_depth, norms = None, None, None
     if stage == 'test-foreground':
         # distances = torch.norm(means3D - viewpoint_camera.camera_center.cuda(), dim=1)
@@ -255,8 +253,7 @@ def render(viewpoint_camera, pc, pipe, bg_color: torch.Tensor, scaling_modifier=
             eps2d=0.1,
             sh_degree=pc.active_sh_degree
         )
-        rendered_image = rendered_image.squeeze(0).permute(2,0,1)
-        
+        rendered_image = rendered_image.squeeze(0).permute(2,0,1)    
     elif view_args['vis_mode'] in ['render']:
         distances = torch.norm(means3D - viewpoint_camera.camera_center.cuda(), dim=1)
         mask = distances > 0.3
@@ -266,6 +263,17 @@ def render(viewpoint_camera, pc, pipe, bg_color: torch.Tensor, scaling_modifier=
         opacity = opacity[mask]
         colors = colors[mask]
 
+        
+        if view_args['lighting']:
+            pointsrc = sources[0]
+            # Modify Colors og Gaussians based on Source Positions and behaviours
+            origins, directions = generate_pointsrc_rays(pointsrc.get_xyz)
+            
+            colors = shadows_from_rays(pc, means3D, scales, rotation, colors, origins, directions, optix_runner)
+            
+            # Append sources 
+            means3D, scales, rotation, colors, opacity = pointsrc.full_scene_construction(means3D, scales, rotation, colors, opacity)
+        
         rendered_image, alpha, _ = rasterization(
             means3D, rotation, scales, opacity.squeeze(-1), colors,
 
@@ -930,7 +938,7 @@ def render_triangles(viewpoint_camera, pc, optix_runner):
     verts = verts.detach()
     N = 4
     # Forward through runner
-    buffer_image = RaycastSTE.apply(x, d, N, colors_v, verts, optix_runner, False)
+    buffer_image = optix_runner(x, d, N, colors_v, verts, False)
 
     return buffer_image
 
@@ -947,7 +955,7 @@ def generate_triangles(means, mag, dirs, colors, opacity, view_dirs, motion_mask
     """
     device, dtype = means.device, means.dtype
 
-    mask = (opacity.squeeze(-1) > thresh) & motion_mask
+    mask = motion_mask
     means  = means[mask]          # (K,3)
     mag    = mag[mask]            # (K,2)
     dirs   = dirs[mask]           # (K,2,3)
@@ -981,3 +989,72 @@ def generate_triangles(means, mag, dirs, colors, opacity, view_dirs, motion_mask
     tri_rgb = (tri_rgb + 0.5).clamp(0.0, 1.0)
 
     return verts_flat, tri_rgb
+
+def generate_triangles_plain(means, mag, dirs, scale_factor=1.5):
+    """
+    means:   (N,3)
+    mag:     (N,2)          extents along the two in-plane axes
+    dirs:    (N,2,3)        two in-plane direction vectors (should be unit)
+    colors:  (N,16,3)       SH coeffs
+    opacity: (N,1) or (N,)
+    returns:
+        verts_flat: (K*4*3, 3)   flattened triangle vertices
+        tri_rgb:    (K, 3)     per-triangle RGB from SH DC
+    """
+    device, dtype = means.device, means.dtype
+
+
+    # Normalize dirs to avoid scale bugs
+    dirs = dirs / (torch.linalg.norm(dirs, dim=-1, keepdim=True) + 1e-8)
+
+    # 4 sign combos (corners)
+    signs = torch.tensor([[ 1,  1],
+                          [-1,  1],
+                          [-1, -1],
+                          [ 1, -1]], device=device, dtype=dtype) * scale_factor  # (4,2)
+
+    # Corner points: mean + half_extent*(s0*mag0*dir0 + s1*mag1*dir1)
+    corner_offsets = (
+        (signs[None, :, :, None] * mag[:, None, :, None] * dirs[:, None, :, :]).sum(dim=2)
+    )  # (K,4,3)
+    corners = means[:, None, :] + corner_offsets  # (K,4,3)
+
+    # Build 4 triangles around center: (center, corner_i, corner_{i+1})
+    corners_next = torch.roll(corners, shifts=-1, dims=1)        # (K,4,3)
+    centers = means[:, None, :].expand(-1, 4, -1)                # (K,4,3)
+
+    tris = torch.stack([centers, corners, corners_next], dim=2)  # (K,4,3,3)
+
+    # Flatten verts like your original code expects
+    verts_flat = tris.reshape(-1, 3)  # (K*4*3,3)
+
+    return verts_flat
+
+
+def generate_pointsrc_rays(light_pos, N=10000000, device='cuda'):
+    g = torch.Generator(device=device)
+    g.manual_seed(0)
+    directions = torch.randn(N, 3, device=device, generator=g)
+    directions = directions / torch.linalg.norm(directions, dim=-1, keepdim=True)
+    origins = light_pos.view(1, 3).expand(N, 3)
+    return origins, directions
+
+
+@torch.no_grad 
+def shadows_from_rays(pc, means3D, scales, rotation, colors, x, d, optix_runner):
+    """
+    Render the scene for viewing
+    """    
+    mag, dirs = pc.get_covmat_ip(rotation, scales)
+        
+    verts = generate_triangles_plain(means3D, mag, dirs)
+    verts = verts.detach()
+    
+    N = 4
+    print(x.shape)
+    
+    hit_idxs = optix_runner.light_trace(x, d, N, verts)
+    print(hit_idxs.shape)
+    colors[hit_idxs] *= 2.
+    
+    return colors

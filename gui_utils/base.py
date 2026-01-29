@@ -83,6 +83,12 @@ class GUIBase:
 
         self.optix_runner = OptixTriangles()
     
+        # Initialize light sources
+        from light_sources.point_light import GPoint
+        self.sources = [GPoint()]
+        
+        self.lighting_flag = False
+        
     def __del__(self):
         dpg.destroy_context()
 
@@ -210,7 +216,10 @@ class GUIBase:
                             "viewer_status":self.switch_off_viewer_args,
                             "vis_mode":self.vis_mode,
                             "finecoarse_flag":self.finecoarse_flag,
-                        }
+                            "lighting":self.lighting_flag
+                        },
+                        sources=self.sources,
+                        optix_runner=self.optix_runner
                 )
 
                 try:
@@ -425,8 +434,11 @@ class GUIBase:
                     
                 def callback_toggle_show_triangles(sender):
                     self.vis_mode = 'triangles'
+                def callback_toggle_show_lighting_flag(sender):
+                    self.lighting_flag = False if self.lighting_flag else True
                 with dpg.group(horizontal=True):
                     dpg.add_button(label="Triangle Rasterizer", callback=callback_toggle_show_triangles)  
+                    dpg.add_button(label="Lights", callback=callback_toggle_show_lighting_flag)  
 
                 with dpg.group(horizontal=True):
                     dpg.add_button(label="RGB", callback=callback_toggle_show_rgb)

@@ -1,16 +1,3 @@
-#
-# Copyright (C) 2023, Inria
-# GRAPHDECO research group, https://team.inria.fr/graphdeco
-# All rights reserved.
-#
-# This software is free for non-commercial, research and evaluation use 
-# under the terms of the LICENSE.md file.
-#
-# For inquiries contact  george.drettakis@inria.fr
-#
-
-# AbsGS for better split on larger points split from https://github.com/TY424/AbsGS/blob/main/scene/gaussian_model.py
-
 import torch
 import numpy as np
 from utils.general_utils import inverse_sigmoid, get_expon_lr_func, build_rotation
@@ -232,6 +219,43 @@ class GaussianModel:
         directions = torch.stack([d_u, d_v], dim=1)      # (N,2,3)
 
         return magnitudes, directions
+    
+    
+    def get_covmat_ip(self, rot, scale):
+        w, x, y, z = rot.unbind(-1)
+        xx, yy, zz = x*x, y*y, z*z
+        xy, xz, yz = x*y, x*z, y*z
+        wx, wy, wz = w*x, w*y, w*z
+
+        R = torch.stack([
+            torch.stack([1 - 2*(yy+zz), 2*(xy - wz),     2*(xz + wy)], dim=-1),
+            torch.stack([2*(xy + wz),   1 - 2*(xx+zz),   2*(yz - wx)], dim=-1),
+            torch.stack([2*(xz - wy),   2*(yz + wx),     1 - 2*(xx+yy)], dim=-1),
+        ], dim=-2)
+        
+        e1 = torch.tensor([1,0,0], device=scale.device, dtype=scale.dtype).expand(scale.size(0), -1)  # (N,3)
+        e2 = torch.tensor([0,1,0], device=scale.device, dtype=scale.dtype).expand(scale.size(0), -1)  # (N,3)
+
+        # Scale local basis
+        v1 = e1 * scale[:, [0]]  # (N,3)
+        v2 = e2 * scale[:, [1]]  # (N,3)
+
+        # Apply rotation: batch matmul (N,3,3) @ (N,3,1) -> (N,3,1)
+        t_u = torch.bmm(R, v1.unsqueeze(-1)).squeeze(-1)  # (N,3)
+        t_v = torch.bmm(R, v2.unsqueeze(-1)).squeeze(-1)  # (N,3)
+
+        # Magnitudes
+        m_u = torch.linalg.norm(t_u, dim=-1)
+        m_v = torch.linalg.norm(t_v, dim=-1)
+
+        # Directions (normalized)
+        d_u = t_u / m_u.unsqueeze(-1)
+        d_v = t_v / m_v.unsqueeze(-1)
+
+        magnitudes = torch.stack([m_u, m_v], dim=-1)     # (N,2)
+        directions = torch.stack([d_u, d_v], dim=1)      # (N,2,3)
+
+        return magnitudes, directions
 
 
     @torch.no_grad()
@@ -371,9 +395,6 @@ class GaussianModel:
                                  
             pcds = pcds[mask, :]
             cols = cols[mask, :]
-            
-
-        
             
         fused_point_cloud = torch.cat([pcds, target], dim=0)
         fused_color = torch.cat([cols, target_col], dim=0)

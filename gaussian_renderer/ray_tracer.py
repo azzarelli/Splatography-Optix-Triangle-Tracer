@@ -212,6 +212,67 @@ class OptixTriangles(nn.Module):
 
         return out
     
+    def light_trace(self, o, d, N, verts):
+        """Intersect ray with screen or scene
+        """
+        # if update_verts or self.gas is None:
+        self.update_gas(cp.from_dlpack(torch.utils.dlpack.to_dlpack(verts)))
+        
+        # Reshape o and d to be compatible with HxW format
+        o = o.unsqueeze(0)
+        d = d.unsqueeze(0)
+        
+        H,W = o.shape[0], o.shape[1]
+        
+        # Build launch params
+        params_tmp = [
+            ('u8', 'image'),
+            ('u4', 'image_width'),
+            ('u4', 'image_height'),
+            ('u8', 'ray_origin'),
+            ('u8', 'ray_direction'),
+            ('u8', 'handle')
+        ]
+
+        params = ox.LaunchParamsRecord(names=[p[1] for p in params_tmp],
+                                    formats=[p[0] for p in params_tmp])
+
+        output_image = cp.zeros((H, W), dtype=cp.uint32)
+        # output_image[:, :, :] = [255, 128, 0, 255]
+        output_image = cp.asarray(output_image)
+
+        params['image'] = output_image.data.ptr
+        params['image_width'] = W
+        params['image_height'] =  H
+                
+        # Pad to float4
+        o4 = cp.zeros((o.shape[0]*o.shape[1], 4), dtype=cp.float32)
+        d4 = cp.zeros_like(o4)
+        o4[:, :3] = cp.from_dlpack(torch.utils.dlpack.to_dlpack(o.view(-1, 3)))
+        d4[:, :3] = cp.from_dlpack(torch.utils.dlpack.to_dlpack(d.view(-1, 3)))
+
+        params['ray_origin']    = o4.data.ptr
+        params['ray_direction'] = d4.data.ptr
+        
+        params['handle'] = self.gas.handle
+
+        stream = cp.cuda.Stream()
+
+        self.pipeline.launch(self.sbt, dimensions=(W,H), params=params, stream=stream)
+
+        stream.synchronize()
+
+        buffer_hit = torch.utils.dlpack.from_dlpack(output_image).int()
+        
+        tri_idx = buffer_hit.view(torch.int32)   # (H,W) int32
+
+        # map triangle index -> gaussian index (since you made 4 tris per gaussian)
+        g_idx = tri_idx // N                     # (H,W), miss stays -1
+
+        valid = (g_idx >= 0)
+        
+        return g_idx #[valid]
+    
 
 class RaycastSTE(torch.autograd.Function):
     @staticmethod
