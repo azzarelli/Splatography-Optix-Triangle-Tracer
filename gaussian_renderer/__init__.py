@@ -263,17 +263,6 @@ def render(viewpoint_camera, pc, pipe, bg_color: torch.Tensor, scaling_modifier=
         opacity = opacity[mask]
         colors = colors[mask]
 
-        
-        if view_args['lighting']:
-            pointsrc = sources[0]
-            # Modify Colors og Gaussians based on Source Positions and behaviours
-            origins, directions = generate_pointsrc_rays(pointsrc.get_xyz)
-            
-            colors = shadows_from_rays(pc, means3D, scales, rotation, colors, origins, directions, optix_runner)
-            
-            # Append sources 
-            means3D, scales, rotation, colors, opacity = pointsrc.full_scene_construction(means3D, scales, rotation, colors, opacity)
-        
         rendered_image, alpha, _ = rasterization(
             means3D, rotation, scales, opacity.squeeze(-1), colors,
 
@@ -284,10 +273,44 @@ def render(viewpoint_camera, pc, pipe, bg_color: torch.Tensor, scaling_modifier=
             
             rasterize_mode='antialiased',
             eps2d=0.1,
-            sh_degree=pc.active_sh_degree
+            sh_degree=pc.active_sh_degree,
+            render_mode='RGB'
         )
         rendered_image = rendered_image.squeeze(0).permute(2,0,1)
         
+        if view_args['lighting']:
+            pointsrc = sources[0]
+            # Modify Colors og Gaussians based on Source Positions and behaviours
+            origins, directions = generate_pointsrc_rays(pointsrc.get_xyz)
+            
+            colors_l = shadows_from_rays(pc, means3D, scales, rotation, colors, origins, directions, optix_runner)
+            
+            # Append sources 
+            means3D, scales, rotation, colors_l, opacity = pointsrc.full_scene_construction(means3D, scales, rotation, colors_l, opacity)
+
+            
+            col_img, _, _ = rasterization(
+                means3D, rotation, scales, opacity.squeeze(-1), colors_l,
+
+                viewpoint_camera.w2c.unsqueeze(0).cuda(), 
+                viewpoint_camera.intrinsics.unsqueeze(0).cuda(),
+                viewpoint_camera.image_width, 
+                viewpoint_camera.image_height,
+                
+                rasterize_mode='antialiased',
+                eps2d=0.1,
+                sh_degree=pc.active_sh_degree,
+                render_mode='RGB+D'
+            )
+            int_map = col_img.squeeze(0).permute(2,0,1)[0, ...].unsqueeze(0).unsqueeze(0) # 1,1,H,W
+            depth_img = col_img.squeeze(0).permute(2,0,1)[-1, ...].unsqueeze(0).unsqueeze(0) # 1,1,H,W
+            
+            lighting = guided_filter(int_map, depth_img).squeeze(0).repeat(3,1,1)
+            
+
+            rendered_image = rendered_image * lighting + lighting*0.5
+            
+
     elif view_args['vis_mode'] == 'alpha':
         _, rendered_image, _ = rasterization(
             means3D, rotation, scales, opacity.squeeze(-1), colors,
@@ -1047,14 +1070,121 @@ def shadows_from_rays(pc, means3D, scales, rotation, colors, x, d, optix_runner)
     """    
     mag, dirs = pc.get_covmat_ip(rotation, scales)
         
-    verts = generate_triangles_plain(means3D, mag, dirs)
+    verts = generate_triangles_plain(means3D, mag, dirs, scale_factor=5.)
     verts = verts.detach()
     
-    N = 4
-    print(x.shape)
+    N = 4   
+    hit_idxs = optix_runner.light_trace(x, d, N, verts).squeeze(0)
+
+    # colors *=0
+
+    # Distance based relighting
+    lpos = x.mean(0).unsqueeze(0)
+    dist2 = ((means3D - lpos) ** 2).sum(dim=-1)          # (G,)
+    falloff = 1.0 / (dist2 + 1e-4)
+    strength = 1.0
     
-    hit_idxs = optix_runner.light_trace(x, d, N, verts)
-    print(hit_idxs.shape)
-    colors[hit_idxs] *= 2.
-    
-    return colors
+    I = 1.0          # luminous intensity scale
+    eps = 1e-4
+    falloff = (I / (dist2 + eps)).clamp(0.0, 1.0)
+
+    falloff = (strength * falloff).clamp(0.0, 1.0)
+        
+    Y0 = 0.282095  # SH constant basis
+    dc_white =  0.5 / Y0   # ~ +1.772
+    dc_black = -0.5 / Y0   # ~ -1.772
+
+    colors_l = torch.zeros_like(colors)
+
+    # If colors is [N, 3*(L+1)^2] flattened per channel, this needs channel-aware indexing.
+    # If it's [N, C, (L+1)^2], then DC is [:, :, 0].
+    # Below assumes [N, 3, K] (common)
+    colors_l[:, 1:] = 0.0
+    colors_l[:, 0]  = dc_black          # make EVERYTHING black
+    dc_hit = dc_black + (dc_white - dc_black) * falloff  # (G,)
+    colors_l[hit_idxs, 0, :] = dc_hit[hit_idxs].unsqueeze(-1)
+    return colors_l
+
+
+def joint_bilateral_intensity(intensity, depth, k=7, sigma_s=20.0, sigma_d=0.001):
+    """
+    intensity: (1,1,H,W) float
+    depth:     (1,1,H,W) float (meters or normalized)
+    """
+    pad = k // 2
+    I = F.pad(intensity, (pad, pad, pad, pad), mode='reflect')
+    D = F.pad(depth,     (pad, pad, pad, pad), mode='reflect')
+
+    # (1, k*k, H*W)
+    I_p = F.unfold(I, kernel_size=k)
+    D_p = F.unfold(D, kernel_size=k)
+
+    # center depth: (1,1,H*W)
+    D0 = depth.view(1, 1, -1)
+
+    # depth weights
+    w_d = torch.exp(-0.5 * ((D_p - D0) / sigma_d) ** 2)
+
+    # spatial weights (precompute)
+    yy, xx = torch.meshgrid(
+        torch.arange(-pad, pad+1, device=intensity.device),
+        torch.arange(-pad, pad+1, device=intensity.device),
+        indexing='ij'
+    )
+    w_s = torch.exp(-0.5 * (xx**2 + yy**2) / (sigma_s**2)).reshape(1, -1, 1)
+
+    w = w_s * w_d
+    out = (w * I_p).sum(dim=1, keepdim=True) / (w.sum(dim=1, keepdim=True).clamp_min(1e-8))
+
+    return out.view_as(intensity)
+
+def _box_filter(x: torch.Tensor, r: int) -> torch.Tensor:
+    """
+    Fast box filter using avg_pool2d.
+    x: (B, C, H, W)
+    r: radius
+    """
+    k = 2 * r + 1
+    return F.avg_pool2d(x, kernel_size=k, stride=1, padding=r)
+
+@torch.no_grad()
+def guided_filter(
+                src: torch.Tensor,
+                guide: torch.Tensor,
+                r: int = 10,
+                eps: float = 1e-3) -> torch.Tensor:
+    """
+    Guided filter for single-channel guide and src.
+
+    guide: (B,1,H,W)   e.g., depth (recommended: normalized or log-depth)
+    src:   (B,1,H,W)   intensity map to smooth
+    r:     radius in pixels
+    eps:   regularization (bigger => more smoothing, less edge following)
+
+    returns: (B,1,H,W)
+    """
+    assert guide.ndim == 4 and src.ndim == 4
+    assert guide.shape[:2] == (src.shape[0], 1) and src.shape[1] == 1
+    assert guide.shape[-2:] == src.shape[-2:]
+
+    I = guide
+    p = src
+
+    mean_I = _box_filter(I, r)
+    mean_p = _box_filter(p, r)
+    mean_Ip = _box_filter(I * p, r)
+
+    cov_Ip = mean_Ip - mean_I * mean_p
+
+    mean_II = _box_filter(I * I, r)
+    var_I = mean_II - mean_I * mean_I
+
+    a = cov_Ip / (var_I + eps)
+    b = mean_p - a * mean_I
+
+    mean_a = _box_filter(a, r)
+    mean_b = _box_filter(b, r)
+
+    q = mean_a * I + mean_b
+    return q
+

@@ -1,6 +1,7 @@
-# Splatography-Optix-Triangle-Tracer
+# Extending Splatography for VFX using Optix-Triangle-Tracer
 
-Playing with dynamic Gaussian Splatting and synthetic lighting via raycasting.
+Developing an environment to relight dynamic Gaussian Splatting scenes using synthetic lighting via Optix-raycasting libraries.
 
-
-Uses Optix for ray-triangle acceleration
+Underlying pipeline:
+1. Used the [ViVo dataset](https://vivo-bvicr.github.io/) to train a sparse-view scene using the [Splatography](https://azzarelli.github.io/splatographypage/index.html) dynamic GS model for filmmaking applications
+2. Implemented a ray-tracing interface that estimates first-hit indices of Gaussians 
