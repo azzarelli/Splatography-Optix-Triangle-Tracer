@@ -56,7 +56,6 @@ def interpolate_features_MUL(data, M, kplanes):
     # time m feature
     space = 1.
     spacetime = 1.
-    coltime = 1.
     
 
     # q,r are the coordinate combinations needed to retrieve pts
@@ -65,7 +64,6 @@ def interpolate_features_MUL(data, M, kplanes):
         q,r = coords[i]
         feature = kplanes[i](data[..., (q, r)])
         feature = feature.view(-1, M, feature.shape[-1]).mean(dim=1)
-        # feature = torch.prod(feature, dim=1)
 
         if i in [0,1,3]:
             space = space * feature
@@ -73,15 +71,7 @@ def interpolate_features_MUL(data, M, kplanes):
         elif i in [2, 4, 5]:
             spacetime = spacetime * feature
 
-    # coords = [[3,0], [3,1], [3,2]]
-    # for i in range(len(coords)):
-    #     q,r = coords[i]
-    #     feature = kplanes[6+i](data[..., (q, r)])
-    #     feature = feature.view(-1, M, feature.shape[-1]).mean(dim=1)
-
-    #     coltime = coltime * feature
-
-    return space, spacetime, coltime
+    return space, spacetime
    
 
 def interpolate_features_theta(pts, angle, kplanes):
@@ -289,7 +279,6 @@ class WavePlaneField(nn.Module):
                 
         pts = normalize_aabb(pts, self.aabb)
         pts = pts.reshape(-1, pts.shape[-1])
-        
         pts = torch.cat([pts.view(-1, 3), time], dim=-1)
         
         return interpolate_features_MUL(

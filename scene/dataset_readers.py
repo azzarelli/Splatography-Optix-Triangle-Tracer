@@ -461,7 +461,7 @@ def format_condense_infos(dataset,split, pos=None):
         key_poses = dataset.poses[0:4]  # (R, T) tuples
 
         # Interpolate 300-frame loop at constant velocity
-        interp_poses = interpolate_constant_speed_circle(key_poses,pos, frames_total=1800)
+        interp_poses = interpolate_constant_speed_circle(key_poses, pos, frames_total=1800)
 
         for idx, (R_mat, T_vec) in enumerate(interp_poses):
             FovX, FovY = dataset.load_fov(0)

@@ -14,7 +14,7 @@ import random
 import torch
 from utils.system_utils import searchForMaxIteration
 from scene.dataset_readers import sceneLoadTypeCallbacks
-from scene.gaussian_model import GaussianModel
+from scene.scene_handler import SceneHandler
 from scene.dataset import FourDGSdataset
 from arguments import ModelParams
 from utils.camera_utils import cameraList_from_camInfos, camera_to_JSON
@@ -22,15 +22,15 @@ from torch.utils.data import Dataset
 from scene.dataset_readers import add_points
 class Scene:
 
-    gaussians : GaussianModel
+    gaussianHandler : SceneHandler
 
-    def __init__(self, args : ModelParams, gaussians : GaussianModel, num_cams='4', load_iteration=None, skip_coarse=None, max_frames=50):
+    def __init__(self, args : ModelParams, gaussianHandler : SceneHandler, num_cams='4', load_iteration=None, skip_coarse=None, max_frames=50):
         """
         :param path: Path to colmap scene main folder.
         """
         self.model_path = args.model_path
         self.loaded_iter = None
-        self.gaussians = gaussians
+        self.gaussianHandler = gaussianHandler
         
         if load_iteration:
             if load_iteration == -1:
@@ -60,36 +60,27 @@ class Scene:
         self.train_camera = FourDGSdataset(scene_info.train_cameras, args, dataset_type, 'train', maxframes=max_frames, num_cams=num_cams)
         self.test_camera = FourDGSdataset(scene_info.test_cameras, args, dataset_type, 'test', maxframes=max_frames, num_cams=num_cams)
 
-        if skip_coarse:
-            print(f'Skipping coarse step with {skip_coarse}')
-            self.gaussians.load_ply(os.path.join(skip_coarse,"point_cloud.ply"))
-            self.gaussians.load_model(skip_coarse)
-        elif self.loaded_iter:
+        if self.loaded_iter:
             print(f'Load from iter {self.loaded_iter}')
 
-            self.gaussians.load_ply(os.path.join(self.model_path,
-                                                        "point_cloud",
-                                                        "iteration_" + str(self.loaded_iter),
-                                                        "point_cloud.ply"))
-            self.gaussians.load_model(os.path.join(self.model_path,
-                                                    "point_cloud",
-                                                    "iteration_" + str(self.loaded_iter),
-                                                ))
+            self.gaussianHandler.load_plys(
+                os.path.join(self.model_path,
+                "point_cloud",
+                "iteration_" + str(self.loaded_iter)
+            ))
+            self.gaussianHandler.load_deformations(
+                os.path.join(self.model_path,
+                "point_cloud",
+                "iteration_" + str(self.loaded_iter)
+            ))
         else:
-            print('Creating init from point cloud ...')
-            self.getTrainCameras().dataset.get_mask = True
-            zero_cams = [self.getTrainCameras()[idx] for idx in self.train_camera.zero_idxs]
-            self.getTrainCameras().dataset.get_mask = False
+            print('Pointcloud initialization ...')
 
-            self.gaussians.create_from_pcd(scene_info.point_cloud, zero_cams, dataset_type)
-
-        if not skip_coarse and load_iteration is None:
-            with torch.no_grad():
-                self.train_camera.update_target(self.gaussians._xyz[~self.gaussians.target_mask].mean(dim=0).cpu())
-        
+            self.gaussianHandler.create_scene_from_pointcloud(scene_info.point_cloud)
+ 
         if self.dataset_type == "condense":
             from scene.dataset_readers import format_condense_infos
-            self.video_camera  = format_condense_infos(scene_info.train_cameras, "val", pos=self.gaussians.get_xyz[self.gaussians.target_mask].mean(1))
+            self.video_camera  = format_condense_infos(scene_info.train_cameras, "val", pos=self.gaussianHandler.foreground.get_xyz.mean(1))
 
         
     def get_pseudo_view(self):
@@ -103,8 +94,8 @@ class Scene:
 
         else:
             point_cloud_path = os.path.join(self.model_path, "point_cloud/iteration_{}".format(iteration))
-        self.gaussians.save_ply(os.path.join(point_cloud_path, "point_cloud.ply"))
-        self.gaussians.save_deformation(point_cloud_path)
+        self.gaussianHandler.save_plys(point_cloud_path)
+        self.gaussianHandler.save_deformations(point_cloud_path)
 
     def init_fine(self):
         self.train_camera.dataset.stage = 'fine'

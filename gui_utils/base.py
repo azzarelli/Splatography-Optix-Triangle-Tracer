@@ -16,7 +16,6 @@ class GUIBase:
         
         self.gui = gui
         self.scene = scene
-        self.gaussians = gaussians
         self.runname = runname
         self.view_test = view_test
         
@@ -119,7 +118,11 @@ class GUIBase:
                         self.train_foreground_step()
                     else:
                         self.train_step()
-                        
+                    
+                    if (self.iteration % 10) == 0:
+                        dpg.set_value("_log_points", f"Fg: {self.scene.gaussianHandler.foreground.get_xyz.shape[0]} | Bg: {self.scene.gaussianHandler.background.get_xyz.shape[0]} ")
+                    
+                    
                     self.iteration += 1
 
 
@@ -204,7 +207,7 @@ class GUIBase:
 
                 buffer_image = render(
                         cam,
-                        self.gaussians, 
+                        self.scene.gaussianHandler, 
                         self.pipe, 
                         self.background, 
                         stage=self.stage,
@@ -253,7 +256,7 @@ class GUIBase:
             else:
                 buffer_image = render_triangles(
                         cam,
-                        self.gaussians,
+                        self.scene.gaussianHandler.foreground,
                         self.optix_runner
                 )  # expected H,W,3 (HWC)
 
@@ -301,11 +304,9 @@ class GUIBase:
         print("\n[ITER {}] Saving Gaussians".format(self.iteration))
         self.scene.save(self.iteration, self.stage)
         print("\n[ITER {}] Saving Checkpoint".format(self.iteration))
-        torch.save((self.gaussians.capture(), self.iteration), self.scene.model_path + "/chkpnt" + f"_{self.stage}_" + str(self.iteration) + ".pth")
+        torch.save((self.scene.gaussianHandler.global_capture(), self.iteration), self.scene.model_path + "/chkpnt" + f"_{self.stage}_" + str(self.iteration) + ".pth")
 
     def register_dpg(self):
-        
-        
         ### register texture
         with dpg.texture_registry(show=False):
             dpg.add_raw_texture(
