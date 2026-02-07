@@ -541,7 +541,7 @@ def render_coarse_batch_vanilla(
         colors_final = colors[mask]
         opacity_final = opacity[mask]
 
-        background = torch.rand(1, 3).cuda() 
+        background = torch.rand(3).cuda() 
 
         rgb, _, _ = rasterization(
             means3D_final, rotations_final, scales_final, 
@@ -562,7 +562,7 @@ def render_coarse_batch_vanilla(
         gt_img = viewpoint_camera.original_image.cuda()
         mask = viewpoint_camera.mask.cuda() > 0. # invert binary mask
         inv_mask = 1. - mask.float() 
-        gt = gt_img * inv_mask + (mask)*background.permute(1,0).unsqueeze(-1)
+        gt = gt_img * inv_mask + (mask)*background.unsqueeze(-1).unsqueeze(-1)
 
         L1 += l1_loss(rgb, gt)
     
@@ -673,7 +673,7 @@ def render_coarse_batch_target(viewpoint_cams, pc, pipe, bg_color: torch.Tensor,
         # As we take the NN from some random time step, lets re-calc it frequently
         if (iteration % 500 == 0 and idx == 0) or pc.target_neighbours is None:
             pc.update_neighbours(means3D_final)
-        background = torch.rand(1, 3).cuda() 
+        background = torch.rand(3).cuda().squeeze(0)
         rgb, _, _ = rasterization(
             means3D_final, rotations_final, scales, 
             opacity_final.squeeze(-1), colors_final,
@@ -692,7 +692,8 @@ def render_coarse_batch_target(viewpoint_cams, pc, pipe, bg_color: torch.Tensor,
                 
         gt = viewpoint_camera.original_image.cuda()
         mask = viewpoint_camera.mask.cuda() # > 0. # invert binary mask
-        gt = gt*mask + (1.-mask)*background.permute(1,0).unsqueeze(-1)
+        
+        gt = gt*mask + (1.-mask)*background.unsqueeze(-1).unsqueeze(-1)
         
         L1 += l1_loss(rgb, gt)
     return  L1

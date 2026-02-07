@@ -282,8 +282,8 @@ class GaussianModel:
             x, y, z = xyz_cam[:, 0], xyz_cam[:, 1], xyz_cam[:, 2]
             z = torch.clamp(z, min=0.001)
             
-            x = x / z * camera.focal_x + camera.image_width / 2.0
-            y = y / z * camera.focal_y + camera.image_height / 2.0
+            x = x / z * camera.fx + camera.image_width / 2.0
+            y = y / z * camera.fy + camera.image_height / 2.0
             
             # in_screen = torch.logical_and(torch.logical_and(x >= 0, x < camera.image_width), torch.logical_and(y >= 0, y < camera.image_height))
             
@@ -296,8 +296,8 @@ class GaussianModel:
             # distance[valid] = torch.min(distance[valid], xyz_to_cam[valid])
             distance[valid] = torch.min(distance[valid], z[valid])
             valid_points = torch.logical_or(valid_points, valid)
-            if focal_length < camera.focal_x:
-                focal_length = camera.focal_x
+            if focal_length < camera.fx:
+                focal_length = camera.fx
         
         distance[~valid_points] = distance[valid_points].max()
         
@@ -340,7 +340,8 @@ class GaussianModel:
             # Create mask for points inside polygon
             viable = torch.from_numpy(path.contains_points(points_xy)).cuda()
             
-            
+        print('>>> training setup1')
+
         # Downsample background gaussians
         pcds = fused_point_cloud[~viable].cpu().numpy().astype(np.float64)
         cols = fused_color[~viable].cpu().numpy().astype(np.float64)
@@ -379,6 +380,8 @@ class GaussianModel:
             # target_col = torch.tensor(np.asarray(downsampled_pcd.colors), dtype=fused_color.dtype).cuda()
             pcds = bck_pcds
             cols = bck_cols
+            print('>>> training setup2')
+            
             
         else:
             pcds = torch.tensor(pcds, dtype=fused_point_cloud.dtype).cuda()
@@ -423,6 +426,9 @@ class GaussianModel:
             err = 0.05
         else:
             err = 0.1
+        print('>>> training setup3')
+            
+            
         xyz_min = fused_point_cloud[target_mask].min(0).values - err
         xyz_max = fused_point_cloud[target_mask].max(0).values + err
         self._deformation.deformation_net.set_aabb(xyz_max, xyz_min)
@@ -463,6 +469,9 @@ class GaussianModel:
             opacities[:, 1] = (opacities[:, 1]*1.5)
             opacities[:, 2] = torch.logit(opacities[:, 2]*0.5)
         
+        print('>>> training setup4')
+
+
         self._xyz = nn.Parameter(fused_point_cloud.requires_grad_(True))
         self._colors = nn.Parameter(fused_color.requires_grad_(True))
         self._features_dc = nn.Parameter(features[:,:,0:1].transpose(1, 2).contiguous().requires_grad_(True))
@@ -488,7 +497,6 @@ class GaussianModel:
     
     def training_setup(self, training_args):
         self.percent_dense = training_args.percent_dense
-    
         l = [
             {'params': [self._xyz], 'lr': training_args.position_lr_init * self.spatial_lr_scale, "name": "xyz"},
             

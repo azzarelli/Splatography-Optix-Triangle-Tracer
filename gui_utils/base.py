@@ -155,13 +155,16 @@ class GUIBase:
     def train(self):
         """Train without gui"""
         pbar = tqdm(initial=0, total=self.final_iter, desc=f"[{self.stage}]")
+        print('>>>DPG initialized')
 
         while self.stage != 'done':
             if self.iteration > self.final_iter and self.stage == 'coarse':
                 self.stage = 'fine'
                 self.init_taining()
                 pbar = tqdm(initial=0, total=self.final_iter, desc=f"[{self.stage}]")
-
+                print('>>>Training initialized')
+                
+                
             if self.iteration <= self.final_iter:
                 # Train background and/or foreground depending on stage
                 if self.stage == 'coarse':
