@@ -34,7 +34,7 @@ def default_deform_tracking(config, device):
     return R.unsqueeze(0), T.unsqueeze(0)
 
 
-def decompose_dataset(datadir, rotation_correction, split='test', visualise_poses=False):
+def decompose_dataset(datadir, split='test'):
     with open(os.path.join(datadir, "calibration.json")) as f:
         calib = json.load(f)
 
@@ -44,7 +44,7 @@ def decompose_dataset(datadir, rotation_correction, split='test', visualise_pose
     with open(os.path.join(datadir, "capture-area.json")) as f:
         cap_area_config = json.load(f)
 
-
+    print(datadir, split)
     poses = {}
     for ii, c in enumerate(cam_names):
 
@@ -81,7 +81,7 @@ def decompose_dataset(datadir, rotation_correction, split='test', visualise_pose
         focal = [meta['colour_intrinsics']['fx'], meta['colour_intrinsics']['fy']]
 
         # K = np.array([[focal[0], 0, meta['colour_intrinsics']['ppx']], [0, focal[1], meta['colour_intrinsics']['ppy']], [0, 0, 1]])
-
+        
         poses[c] = {
             'H': H, 'W': W,
             'focal': focal,
@@ -121,7 +121,7 @@ class CondenseData(Dataset):
         self.split = split
         self.num_frames = 0
 
-        self.cam_infos, self.H, self.W = decompose_dataset(datadir, self.rotation_correction, split=split ) #, visualise_poses=True)
+        self.cam_infos, self.H, self.W = decompose_dataset(datadir, split=split ) #, visualise_poses=True)
         self.new_w, self.new_h = int(self.W/ self.downsample), int(self.H/self.downsample)
         
         self.transform = T.ToTensor()

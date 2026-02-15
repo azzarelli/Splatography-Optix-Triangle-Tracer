@@ -509,7 +509,7 @@ def readCondenseSceneInfo(datadir, eval):
 
     train_cam_infos = CondenseData(datadir, split='train')
 
-    test_cam_infos = CondenseData(datadir, split='test')
+    test_cam_infos = None #CondenseData(datadir, split='test')
 
     train_cam_infos_ = format_condense_infos(train_cam_infos, "train")
     nerf_normalization = getNerfppNorm(train_cam_infos_)

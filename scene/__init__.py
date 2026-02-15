@@ -58,7 +58,7 @@ class Scene:
         self.cameras_extent = scene_info.nerf_normalization["radius"]
 
         self.train_camera = FourDGSdataset(scene_info.train_cameras, args, dataset_type, 'train', maxframes=max_frames, num_cams=num_cams)
-        self.test_camera = FourDGSdataset(scene_info.test_cameras, args, dataset_type, 'test', maxframes=max_frames, num_cams=num_cams)
+        self.test_camera = FourDGSdataset(scene_info.test_cameras, args, dataset_type, 'test', maxframes=max_frames, num_cams=num_cams) if scene_info.test_cameras is not None else None
 
         if self.loaded_iter:
             print(f'Load from iter {self.loaded_iter}')
@@ -99,7 +99,8 @@ class Scene:
 
     def init_fine(self):
         self.train_camera.dataset.stage = 'fine'
-        self.test_camera.dataset.stage = 'fine'
+        if self.test_camera is not None:
+            self.test_camera.dataset.stage = 'fine'
 
     def getTrainCameras(self, scale=1.0):
         return self.train_camera

@@ -38,8 +38,11 @@ def render(viewpoint_camera, pc, pipe, bg_color: torch.Tensor, scaling_modifier=
 
     extras = None
     
-    mask_parser = "foreground" if view_args['show_mask'] == 1 else ""
-    
+    try:
+        mask_parser = "foreground" if view_args['show_mask'] == 1 else ""
+    except:
+        mask_parser=""
+        
     if view_args is not None:
         if view_args['finecoarse_flag'] == False:
             means3D, scales, rotation, opacity, colors = pc.static_pass(select=mask_parser)
@@ -80,37 +83,37 @@ def render(viewpoint_camera, pc, pipe, bg_color: torch.Tensor, scaling_modifier=
         )
         rendered_image = rendered_image.squeeze(0).permute(2,0,1)
         
-        if view_args['lighting']:
-            pointsrc = sources[0]
-            # Modify Colors og Gaussians based on Source Positions and behaviours
-            origins, directions = generate_pointsrc_rays(pointsrc.get_xyz)
+        # if view_args['lighting']:
+        #     pointsrc = sources[0]
+        #     # Modify Colors og Gaussians based on Source Positions and behaviours
+        #     origins, directions = generate_pointsrc_rays(pointsrc.get_xyz)
             
-            colors_l = shadows_from_rays(pc, means3D, scales, rotation, colors, origins, directions, optix_runner)
+        #     colors_l = shadows_from_rays(pc, means3D, scales, rotation, colors, origins, directions, optix_runner)
             
-            # Append sources 
-            means3D, scales, rotation, colors_l, opacity = pointsrc.full_scene_construction(means3D, scales, rotation, colors_l, opacity)
+        #     # Append sources 
+        #     means3D, scales, rotation, colors_l, opacity = pointsrc.full_scene_construction(means3D, scales, rotation, colors_l, opacity)
 
             
-            col_img, _, _ = rasterization(
-                means3D, rotation, scales, opacity.squeeze(-1), colors_l,
+        #     col_img, _, _ = rasterization(
+        #         means3D, rotation, scales, opacity.squeeze(-1), colors_l,
 
-                viewpoint_camera.w2c.unsqueeze(0).cuda(), 
-                viewpoint_camera.intrinsics.unsqueeze(0).cuda(),
-                viewpoint_camera.image_width, 
-                viewpoint_camera.image_height,
+        #         viewpoint_camera.w2c.unsqueeze(0).cuda(), 
+        #         viewpoint_camera.intrinsics.unsqueeze(0).cuda(),
+        #         viewpoint_camera.image_width, 
+        #         viewpoint_camera.image_height,
                 
-                rasterize_mode='antialiased',
-                eps2d=0.1,
-                sh_degree=pc.active_sh_degree,
-                render_mode='RGB+D'
-            )
-            int_map = col_img.squeeze(0).permute(2,0,1)[0, ...].unsqueeze(0).unsqueeze(0) # 1,1,H,W
-            depth_img = col_img.squeeze(0).permute(2,0,1)[-1, ...].unsqueeze(0).unsqueeze(0) # 1,1,H,W
+        #         rasterize_mode='antialiased',
+        #         eps2d=0.1,
+        #         sh_degree=pc.active_sh_degree,
+        #         render_mode='RGB+D'
+        #     )
+        #     int_map = col_img.squeeze(0).permute(2,0,1)[0, ...].unsqueeze(0).unsqueeze(0) # 1,1,H,W
+        #     depth_img = col_img.squeeze(0).permute(2,0,1)[-1, ...].unsqueeze(0).unsqueeze(0) # 1,1,H,W
             
-            lighting = guided_filter(int_map, depth_img).squeeze(0).repeat(3,1,1)
+        #     lighting = guided_filter(int_map, depth_img).squeeze(0).repeat(3,1,1)
             
 
-            rendered_image = rendered_image * lighting + lighting*0.5
+        #     rendered_image = rendered_image * lighting + lighting*0.5
             
 
     elif view_args['vis_mode'] == 'alpha':
@@ -445,27 +448,13 @@ def render_motion_point_mask(pc):
     """
     Render the scene.
     """
-    means3D = pc.get_xyz.detach()
-    scales = pc.get_scaling_with_3D_filter.detach()
-    rotations = pc._rotation.detach()
-    colors = pc.get_features.detach()
-    opacity = pc.get_opacity.detach()
-    
-    L1 = 0.
-
-    time = torch.zeros_like(means3D[:, 0], device=means3D.device).unsqueeze(-1)
     means3D_collection = []
     for i in range(10):
-        time = time*0. + float(i)*0.1
+        time = float(i)*0.1
 
-        means3D_final, rotations_final, opacity_final, colors_final, norms = pc._deformation(
-            point=means3D, 
-            rotations=rotations,
-            scales = scales,
-            times_sel=time, 
-            h_emb=opacity,
-            shs=colors,
-        )
+        means3D_final,_,_,_,_ = pc.deform(time)
+        
+
         
         means3D_collection.append(means3D_final.unsqueeze(0))
     

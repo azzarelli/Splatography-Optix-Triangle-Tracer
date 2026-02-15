@@ -43,7 +43,7 @@ class Deformation(nn.Module):
         
         if self.is_background == False:
             self.rotations_deform = nn.Sequential(nn.ReLU(),nn.Linear(net_size,net_size),nn.ReLU(),nn.Linear(net_size, 4))
-            self.shs_deform = nn.Sequential(nn.ReLU(),nn.Linear(net_size, net_size),nn.ReLU(),nn.Linear(net_size, 16*3))
+            self.shs_deform = nn.Sequential(nn.ReLU(),nn.Linear(net_size, net_size),nn.ReLU(),nn.Linear(net_size, 15*3))
     
     def query_spacetime(self, xyzs, t, covariances):
         time = torch.full_like(xyzs[:,0], t, device=xyzs.device).unsqueeze(-1)
@@ -77,9 +77,9 @@ class Deformation(nn.Module):
         # Rotation
         rotations = rotations_emb + self.rotations_deform(dyn_feature)
         
-        shs = shs_emb + self.shs_deform(dyn_feature).view(-1, 16, 3)
+        shs_emb[:, 1:] = shs_emb[:, 1:] + self.shs_deform(dyn_feature).view(-1, 15, 3)
         
-        return pts, rotations, opacity, shs
+        return pts, rotations, opacity, shs_emb
     
     def get_mlp_parameters(self):
         parameter_list = []

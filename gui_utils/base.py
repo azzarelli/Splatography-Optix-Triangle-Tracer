@@ -20,8 +20,8 @@ class GUIBase:
         self.view_test = view_test
         
         # Set the width and height of the expected image
-        self.W, self.H = self.scene.getTestCameras()[0].image_width, self.scene.getTestCameras()[0].image_height
-        self.fov = (self.scene.getTestCameras()[0].FoVy, self.scene.getTestCameras()[0].FoVx)
+        self.W, self.H = self.scene.train_camera[0].image_width, self.scene.train_camera[0].image_height
+        self.fov = (self.scene.train_camera[0].FoVy, self.scene.train_camera[0].FoVx)
 
         if self.H > 1200 and self.scene != "dynerf":
             self.W = self.W//2
@@ -49,22 +49,11 @@ class GUIBase:
         
         self.N_pseudo = 3 
         if view_test:
-            if self.scene.dataset_type == 'dynerf':
-                self.free_cams = [self.scene.getTestCameras()[0], self.scene.getTestCameras()[49]] + [self.scene.getTrainCameras()[idx] for idx in self.scene.train_camera.zero_idxs]
-            else:
-                self.free_cams = [self.scene.getTestCameras()[i*300] for i in range(2)] + [self.scene.getTrainCameras()[idx] for idx in self.scene.train_camera.zero_idxs]
+                self.free_cams = [self.scene.getTrainCameras()[idx] for idx in self.scene.train_camera.zero_idxs]
 
         else:
-            if self.scene.dataset_type == 'dynerf':
-                self.free_cams = [self.scene.getTestCameras()[0]] + [self.scene.getTrainCameras()[idx] for idx in self.scene.train_camera.zero_idxs]
-            else:
-                self.free_cams = [self.scene.getTestCameras()[i*300] for i in range(2)] + [self.scene.getTrainCameras()[idx] for idx in self.scene.train_camera.zero_idxs]
+            self.free_cams = [self.scene.getTrainCameras()[idx] for idx in self.scene.train_camera.zero_idxs]
 
-            # try:
-            #     self.free_cams = [self.scene.get_pseudo_view() for i in range(self.N_pseudo)]+ [self.scene.getTestCameras()[0]] + [self.scene.getTrainCameras()[idx] for idx in self.scene.train_camera.zero_idxs]
-            # except:
-            #     self.free_cams = [self.scene.getTestCameras()[0]] + [self.scene.getTrainCameras()[idx] for idx in self.scene.train_camera.zero_idxs]
-        # self.free_cams = [self.scene.get_pseudo_view() for i in range(self.N_pseudo)] + [self.scene.getTrainCameras()[idx] for idx in self.scene.train_camera.zero_idxs]
         self.current_cam_index = 0
         self.original_cams = [copy.deepcopy(cam) for cam in self.free_cams]
         
@@ -125,28 +114,15 @@ class GUIBase:
                     
                     self.iteration += 1
 
-
-                if (self.iteration % 1000) == 0 and  self.stage == 'fine':
-                    self.test_step()
+                # Currently not running testing
+                # if (self.iteration % 1000) == 0 and  self.stage == 'fine':
+                #     self.test_step()
 
                 if self.iteration > self.final_iter and self.stage == 'fine':
                     self.stage = 'done'
                     dpg.stop_dearpygui() 
-                    # exit()
-            # elif tested:
-            #     # self.test_step()
-            #     tested = False
-            #     dpg.stop_dearpygui() 
 
-            # self.render_video_step()
-            # self.test_step()
-            # exit()
 
-            # if self.view_test == True:
-            #     self.train_depth()
-            # with torch.no_grad():
-            #     self.test_step()
-            #     exit()
             with torch.no_grad():
                 self.viewer_step()
                 dpg.render_dearpygui_frame()

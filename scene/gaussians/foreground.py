@@ -74,9 +74,6 @@ class ForegroundGaussians(GaussianModel):
     
     def save_deformation(self, path):
         torch.save(self._deformation.state_dict(),os.path.join(path, "foreground_deformation.pth"))
-    
-    
-
 
     def cat_tensors_to_optimizer(self, tensors_dict):
         optimizable_tensors = {}
@@ -142,7 +139,7 @@ class ForegroundGaussians(GaussianModel):
             "opacity": new_opacities,
             "rotation" : new_rotation,
             "f_dc": new_features_dc,
-        "f_rest": new_features_rest,
+            "f_rest": new_features_rest,
         }
         optimizable_tensors = self.cat_tensors_to_optimizer(d)
 
@@ -150,7 +147,6 @@ class ForegroundGaussians(GaussianModel):
         self._opacity = optimizable_tensors["opacity"]
         self._scaling = optimizable_tensors["scaling"]
         self._rotation = optimizable_tensors["rotation"]
-        # self._colors = optimizable_tensors["color"]
         self._features_dc = optimizable_tensors["f_dc"]
         self._features_rest = optimizable_tensors["f_rest"]
     
@@ -176,12 +172,7 @@ class ForegroundGaussians(GaussianModel):
         new_scaling = self._scaling[selected_pts_mask]
         new_rotation = self._rotation[selected_pts_mask]
         new_opacities = self._opacity[selected_pts_mask]
-        # new_colors = self._colors[selected_pts_mask]
         
-        # Update target mask
-        new_target_mask = self.target_mask[selected_pts_mask]
-        self.target_mask = torch.cat([self.target_mask, new_target_mask], dim=0)
-
         self.densification_postfix(new_xyz, new_features_dc, new_features_rest, new_opacities, new_scaling, new_rotation)
 
     def prune(self,cam_list): # h_thresold, extent, max_screen_size,):
