@@ -8,15 +8,17 @@ I am using the [ViVo dataset](https://vivo-bvicr.github.io/) for doing this on m
 
 
 
-# Visualization/Editing
+# Features
 
-- Using Nvidia's Optix (for RTX machines; CUDA based): a Gaussian->Triangle algorithm + fast Ray-Triangle intersection
+- **Triangle Rasterizer:** Using Nvidia's Optix (for RTX machines; CUDA based): a Gaussian->Triangle algorithm + fast Ray-Triangle intersection
 - View foreground/background segmented + modify various internal features
 
 
 # Model/Code Information
 
 I have re-implemented the [Splatography](https://azzarelli.github.io/splatographypage/index.html), a dynamic GS pipeline that my collegues and I designed for filmmaking application on 6DoF dynamic scenes in sparse camera settings. Please see the original repo if you're interested in how it works.
+
+Note that I have also implemented loading functionality models trained on the original Splatography code (viewing only).
 
 ## Installation
 
