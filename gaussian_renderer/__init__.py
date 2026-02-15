@@ -491,21 +491,19 @@ from gaussian_renderer.ray_tracer import RaycastSTE
 def render_triangles(viewpoint_camera, pc, optix_runner):
     """
     Render the scene for viewing
-    """
-    time = torch.tensor(viewpoint_camera.time).to(pc.get_xyz.device).repeat(pc.get_xyz.shape[0], 1)
-    means3D, rotation, opacity, colors, scales = process_Gaussians(pc, time)
-    
+    """    
+    mask_parser="foreground"
+    means3D, scales, rotation, opacity, colors = pc.deformation_pass(viewpoint_camera.time, select=mask_parser)
+
     x, d = viewpoint_camera.generate_rays()
     
-    mag, dirs = pc.get_covmat
+    mag, dirs = pc.foreground.get_covmat
         
     cam_pos = viewpoint_camera.camera_center.to(means3D.device)  # you may need to adapt this
     view_dirs = means3D - cam_pos[None, :]
     view_dirs = view_dirs / (torch.linalg.norm(view_dirs, dim=-1, keepdim=True) + 1e-8)
-
-    motion_mask = pc.target_mask
     
-    verts, colors_v = generate_triangles(means3D, mag, dirs, colors, opacity, view_dirs, motion_mask)
+    verts, colors_v = generate_triangles(means3D, mag, dirs, colors, opacity, view_dirs)
     verts = verts.detach()
     N = 4
     # Forward through runner
@@ -513,7 +511,7 @@ def render_triangles(viewpoint_camera, pc, optix_runner):
 
     return buffer_image
 
-def generate_triangles(means, mag, dirs, colors, opacity, view_dirs, motion_mask, thresh=0.05, scale_factor=1.5):
+def generate_triangles(means, mag, dirs, colors, opacity, view_dirs, thresh=0.05, scale_factor=1.5):
     """
     means:   (N,3)
     mag:     (N,2)          extents along the two in-plane axes
@@ -526,11 +524,10 @@ def generate_triangles(means, mag, dirs, colors, opacity, view_dirs, motion_mask
     """
     device, dtype = means.device, means.dtype
 
-    mask = motion_mask
-    means  = means[mask]          # (K,3)
-    mag    = mag[mask]            # (K,2)
-    dirs   = dirs[mask]           # (K,2,3)
-    rgb = colors[mask] 
+    means  = means          # (K,3)
+    mag    = mag            # (K,2)
+    dirs   = dirs
+    rgb = colors
 
     # Normalize dirs to avoid scale bugs
     dirs = dirs / (torch.linalg.norm(dirs, dim=-1, keepdim=True) + 1e-8)
@@ -556,7 +553,7 @@ def generate_triangles(means, mag, dirs, colors, opacity, view_dirs, motion_mask
     # Flatten verts like your original code expects
     verts_flat = tris.reshape(-1, 3)  # (K*4*3,3)
 
-    tri_rgb = eval_sh(3, rgb.permute(0,2,1), view_dirs[mask])
+    tri_rgb = eval_sh(3, rgb.permute(0,2,1), view_dirs)
     tri_rgb = (tri_rgb + 0.5).clamp(0.0, 1.0)
 
     return verts_flat, tri_rgb

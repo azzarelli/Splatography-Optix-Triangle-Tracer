@@ -232,7 +232,7 @@ class GUIBase:
             else:
                 buffer_image = render_triangles(
                         cam,
-                        self.scene.gaussianHandler.foreground,
+                        self.scene.gaussianHandler,
                         self.optix_runner
                 )  # expected H,W,3 (HWC)
 
