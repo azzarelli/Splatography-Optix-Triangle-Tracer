@@ -1,4 +1,4 @@
-# Extending Splatography for VFX using Optix-Triangle-Tracer
+# Extending Splatography for VFX using Fast Optix Tracing
 
 The current tools for VFX on Gaussian Splatting are all 3D-only - No dynamic! (can you even believe it!)
 
