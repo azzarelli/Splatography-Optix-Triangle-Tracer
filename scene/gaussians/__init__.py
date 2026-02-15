@@ -43,8 +43,7 @@ class GaussianModel:
 
     
     """ Parametric Properties
-    """
-    
+    """ 
     @property
     def get_features(self):
         features_dc = self._features_dc
@@ -240,7 +239,7 @@ class GaussianModel:
 
         self._features_dc = nn.Parameter(f_dc.requires_grad_(True))
         self._features_rest = nn.Parameter(f_rest.requires_grad_(True))
-        
+        print(self._features_dc.shape, self._features_rest.shape)
         mean_foreground = xyz.mean(dim=0).unsqueeze(0)
         dist_foreground = torch.norm(xyz - mean_foreground, dim=1)
         self.spatial_lr_scale = torch.max(dist_foreground).detach().cpu().numpy()
@@ -285,6 +284,7 @@ class GaussianModel:
         PlyData([el]).write(path)
         
     def load_ply(self, path):
+            
         plydata = PlyData.read(path)
 
         xyz = np.stack((np.asarray(plydata.elements[0]["x"]),

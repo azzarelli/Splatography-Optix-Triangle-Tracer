@@ -63,16 +63,18 @@ class Scene:
         if self.loaded_iter:
             print(f'Load from iter {self.loaded_iter}')
 
-            self.gaussianHandler.load_plys(
+            check = self.gaussianHandler.load_plys(
                 os.path.join(self.model_path,
                 "point_cloud",
                 "iteration_" + str(self.loaded_iter)
             ))
-            self.gaussianHandler.load_deformations(
-                os.path.join(self.model_path,
-                "point_cloud",
-                "iteration_" + str(self.loaded_iter)
-            ))
+            
+            if check != "oldmodel":
+                self.gaussianHandler.load_deformations(
+                    os.path.join(self.model_path,
+                    "point_cloud",
+                    "iteration_" + str(self.loaded_iter)
+                ))
         else:
             print('Pointcloud initialization ...')
 

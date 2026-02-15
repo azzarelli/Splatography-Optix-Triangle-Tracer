@@ -5,6 +5,9 @@ from utils.sh_utils import RGB2SH
 from simple_knn._C import distCUDA2
 from utils.graphics_utils import BasicPointCloud
 import os
+from plyfile import PlyData, PlyElement
+
+from scene.old_deformation import deform_network as oldDeformationNet
 
 from scene.gaussians.foreground import ForegroundGaussians
 from scene.gaussians.background import BackgroundGaussians
@@ -66,9 +69,98 @@ class SceneHandler:
         self.background.save_ply(os.path.join(path, "background_scene.ply"))
         
     def load_plys(self, path):
-        self.foreground.load_ply(os.path.join(path, "foreground_scene.ply"))
-        self.background.load_ply(os.path.join(path, "background_scene.ply"))
+        check_files = os.listdir(path)
+        if "point_cloud.ply" in check_files:
+            chkpt_idx = path.split('_')[-1]
+            self.load_from_old_model(path.replace(f"/point_cloud/iteration_{chkpt_idx}", ""), os.path.join(path, "point_cloud.ply"), chkpt_idx)
+            return "oldmodel"
+        else:
+            self.foreground.load_ply(os.path.join(path, "foreground_scene.ply"))
+            self.background.load_ply(os.path.join(path, "background_scene.ply"))
+
+        return None
+
+    def load_from_old_model(self, path_base, path, chkpt_idx):            
+        plydata = PlyData.read(path)
+
+        xyz = np.stack((np.asarray(plydata.elements[0]["x"]),
+                        np.asarray(plydata.elements[0]["y"]),
+                        np.asarray(plydata.elements[0]["z"])),  axis=1)
         
+        opac_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("opacity")]
+        opac_names = sorted(opac_names, key = lambda x: int(x.split('_')[-1]))
+        opacities = np.zeros((xyz.shape[0], len(opac_names)))
+        for idx, attr_name in enumerate(opac_names):
+            opacities[:, idx] = np.asarray(plydata.elements[0][attr_name])
+            
+        scale_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("scale_")]
+        scale_names = sorted(scale_names, key = lambda x: int(x.split('_')[-1]))
+        scales = np.zeros((xyz.shape[0], len(scale_names)))
+        for idx, attr_name in enumerate(scale_names):
+            scales[:, idx] = np.asarray(plydata.elements[0][attr_name])
+
+        rot_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("rot")]
+        rot_names = sorted(rot_names, key = lambda x: int(x.split('_')[-1]))
+        rots = np.zeros((xyz.shape[0], len(rot_names)))
+        for idx, attr_name in enumerate(rot_names):
+            rots[:, idx] = np.asarray(plydata.elements[0][attr_name])
+            
+        
+        features_dc = np.zeros((xyz.shape[0], 3, 1))
+        features_dc[:, 0, 0] = np.asarray(plydata.elements[0]["f_dc_0"])
+        features_dc[:, 1, 0] = np.asarray(plydata.elements[0]["f_dc_1"])
+        features_dc[:, 2, 0] = np.asarray(plydata.elements[0]["f_dc_2"])
+        extra_f_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("f_rest_")]
+        extra_f_names = sorted(extra_f_names, key = lambda x: int(x.split('_')[-1]))
+        assert len(extra_f_names)==3*(self.max_sh_degree + 1) ** 2 - 3
+        features_extra = np.zeros((xyz.shape[0], len(extra_f_names)))
+        for idx, attr_name in enumerate(extra_f_names):
+            features_extra[:, idx] = np.asarray(plydata.elements[0][attr_name])
+        # Reshape (P,F*SH_coeffs) to (P, F, SH_coeffs except DC)
+        features_extra = features_extra.reshape((features_extra.shape[0], 3, (self.max_sh_degree + 1) ** 2 - 1))
+
+        self.active_sh_degree = self.max_sh_degree
+
+        
+        (model_params, first_iter) = torch.load(f'{path_base}/chkpnt_fine_{chkpt_idx}.pth')
+        (_,_,_,_,_,_,_,_,_,filter_3D,_,_,_, target_mask) = model_params
+
+        xyz = torch.from_numpy(xyz).cuda().float()
+        scales = torch.from_numpy(scales).cuda().float()
+        rots = torch.from_numpy(rots).cuda().float()
+        opacities = torch.from_numpy(opacities).cuda().float()
+        features_dc = torch.from_numpy(features_dc).cuda().permute(0,2,1).float()
+        features_extra = torch.from_numpy(features_extra).cuda().permute(0,2,1).float()
+
+        self.foreground.initialize(xyz[target_mask], scales[target_mask], rots[target_mask], opacities[target_mask], features_dc[target_mask], features_extra[target_mask])  
+        self.foreground.filter_3D = filter_3D[target_mask]
+        
+        target_mask = ~target_mask
+        self.background.initialize(xyz[target_mask], scales[target_mask], rots[target_mask], opacities[target_mask], features_dc[target_mask], features_extra[target_mask])  
+        self.background.filter_3D = filter_3D[target_mask]
+        
+        
+        weight_dict = torch.load(path.replace("point_cloud.ply", "deformation.pth"), map_location="cuda")
+        oldDef = oldDeformationNet()
+        oldDef.load_state_dict(weight_dict)
+        oldDef = oldDef.to("cuda")
+        
+        # Update grids
+        self.foreground._deformation.deformation_net.grid = oldDef.deformation_net.grid
+        self.background._deformation.deformation_net.grid = oldDef.deformation_net.background_grid
+  
+        # Update MLP heads      
+        self.foreground._deformation.deformation_net.spacetime_enc = oldDef.deformation_net.spacetime_enc
+        self.foreground._deformation.deformation_net.pos_coeffs = oldDef.deformation_net.pos_coeffs
+        self.foreground._deformation.deformation_net.rotations_deform = oldDef.deformation_net.rotations_deform
+        self.foreground._deformation.deformation_net.shs_deform = oldDef.deformation_net.shs_deform
+        
+        self.background._deformation.deformation_net.spacetime_enc = oldDef.deformation_net.background_spacetime_enc
+        self.background._deformation.deformation_net.pos_coeffs = oldDef.deformation_net.background_pos_coeffs
+        
+        self.foreground._deformation.deformation_net.is_old_model = True
+        self.background._deformation.deformation_net.is_old_model = True
+
     def create_scene_from_pointcloud(self, pcd : BasicPointCloud):
         """Designed for handling the ViVO dataset
         """

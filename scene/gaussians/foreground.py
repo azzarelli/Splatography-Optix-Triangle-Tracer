@@ -184,8 +184,6 @@ class ForegroundGaussians(GaussianModel):
         self.prune_points(prune_mask)
         torch.cuda.empty_cache()
           
-
-
     def compute_regulation(self, time_smoothness_weight, l1_time_planes_weight, plane_tv_weight,
                            minview_weight):
         tvtotal = 0

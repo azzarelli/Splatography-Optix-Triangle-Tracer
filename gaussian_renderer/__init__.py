@@ -59,13 +59,6 @@ def render(viewpoint_camera, pc, pipe, bg_color: torch.Tensor, scaling_modifier=
     
     rendered_image, rendered_depth, norms = None, None, None
     if view_args['vis_mode'] in ['render']:
-        distances = torch.norm(means3D - viewpoint_camera.camera_center.cuda(), dim=1)
-        mask = distances > 0.3
-        means3D = means3D[mask]
-        rotation = rotation[mask]
-        scales = scales[mask]
-        opacity = opacity[mask]
-        colors = colors[mask]
         
         rendered_image, alpha, _ = rasterization(
             means3D, rotation, scales, opacity.squeeze(-1), colors,

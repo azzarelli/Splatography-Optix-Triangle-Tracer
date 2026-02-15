@@ -28,7 +28,9 @@ class Deformation(nn.Module):
 
 
         self.create_net()
-
+        
+        self.is_old_model = False
+        
         
     def set_aabb(self, xyz_max, xyz_min):
         self.grid.set_aabb(xyz_max, xyz_min)
@@ -62,13 +64,13 @@ class Deformation(nn.Module):
         # Change in position & opacity for both
         pts = rays_pts_emb + self.pos_coeffs(dyn_feature)      
         
-        # opacity = h_emb[:,0].unsqueeze(-1)
-        opacity = torch.sigmoid(h_emb[:,0]).unsqueeze(-1)
-        # w = (h_emb[:,1]**2).unsqueeze(-1)
-        # mu = torch.sigmoid(h_emb[:,2]).unsqueeze(-1)
+        opacity = h_emb[:,0].unsqueeze(-1)
+        # opacity = torch.sigmoid(h_emb[:,0]).unsqueeze(-1)
+        w = (h_emb[:,1]**2).unsqueeze(-1)
+        mu = torch.sigmoid(h_emb[:,2]).unsqueeze(-1)
         
-        # t = time_emb
-        # opacity = torch.exp(-w * (t-mu)**2)
+        t = time_emb
+        opacity = torch.exp(-w * (t-mu)**2)
         
         # Background only condition - early exit
         if self.is_background:
@@ -77,7 +79,10 @@ class Deformation(nn.Module):
         # Rotation
         rotations = rotations_emb + self.rotations_deform(dyn_feature)
         
-        shs_emb[:, 1:] = shs_emb[:, 1:] + self.shs_deform(dyn_feature).view(-1, 15, 3)
+        if self.is_old_model:
+            shs_emb = shs_emb + self.shs_deform(dyn_feature).view(-1, 16, 3)
+        else:
+            shs_emb[:, 1:] = shs_emb[:, 1:] + self.shs_deform(dyn_feature).view(-1, 15, 3)
         
         return pts, rotations, opacity, shs_emb
     
